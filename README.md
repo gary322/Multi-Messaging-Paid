@@ -129,17 +129,17 @@ By default, the API uses SQLite at `data/mmp.sqlite`. For production-like runs, 
 ```mermaid
 flowchart LR
   subgraph Clients
-    WEB[Web UI (Next.js)]
+    WEB["Web UI (Next.js)"]
     SCRIPTS[scripts / curl]
   end
 
-  WEB -->|HTTP| API[API (Fastify)]
+  WEB -->|HTTP| API["API (Fastify)"]
   SCRIPTS -->|HTTP| API
 
   API -->|SQL| DB[(Postgres / SQLite)]
   API -->|challenge state + distributed locks| R[(Redis)]
 
-  API -->|RPC| CHAIN[(EVM Chain\nHardhat / Base)]
+  API -->|RPC| CHAIN[(EVM Chain: Hardhat / Base)]
 
   %% Workers are separate processes from the same @mmp/api codebase.
   subgraph Workers
@@ -151,10 +151,10 @@ flowchart LR
   IDX -->|checkpoint + upsert| DB
 
   DLW -->|claim jobs + retry| DB
-  DLW -->|notify| PROVIDERS[Telegram / WhatsApp / X]
+  DLW -->|notify| PROVIDERS["Telegram / WhatsApp / X"]
 
-  API -->|send OTP| OTP[Twilio / SendGrid\n(or console in dev)]
-  API -->|OAuth| OAUTH[Google / GitHub]
+  API -->|send OTP| OTP["Twilio / SendGrid (or console in dev)"]
+  API -->|OAuth| OAUTH["Google / GitHub"]
 
   API -->|/v1/metrics| PROM[Prometheus]
   API -->|OTLP traces| TEMPO[Tempo]
@@ -829,7 +829,7 @@ flowchart TB
   V --> B2
   V --> BF
 
-  V -->|emit| E[MessagePaid(payer, recipient, messageId, amount, fee, contentHash, nonce, channel)]
+  V -->|emit| E["MessagePaid(payer, recipient, messageId, amount, fee, contentHash, nonce, channel)"]
 ```
 
 ## Observability
