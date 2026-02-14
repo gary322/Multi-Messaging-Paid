@@ -28,7 +28,7 @@ docker compose -f infra/docker-compose.observability.yml up -d
 
 - Prometheus: http://localhost:9090
 - Alertmanager: http://localhost:9093
-- Grafana: http://localhost:3000
+- Grafana: http://localhost:3001 (override with `MMP_GRAFANA_PORT`)
 
 Grafana default admin credentials are:
 
