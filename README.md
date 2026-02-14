@@ -142,7 +142,8 @@ flowchart LR
 
   API -->|RPC| CHAIN[(EVM Chain\nHardhat / Base)]
 
-  subgraph Workers (same @mmp/api codebase)
+  %% Workers are separate processes from the same @mmp/api codebase.
+  subgraph Workers
     IDX[Indexer Worker]
     DLW[Delivery Worker]
   end
@@ -765,7 +766,7 @@ The codebase includes two production-style loops:
 
 ```mermaid
 flowchart LR
-  subgraph Postgres Tables
+  subgraph PostgresTables
     CE[chain_events]
     CP[chain_event_checkpoints]
     DJ[delivery_jobs]
@@ -819,7 +820,7 @@ flowchart TB
   U[User Wallet] -->|approve + deposit| V[PayInboxVault]
   V -->|withdraw| U
 
-  subgraph Internal Ledger
+  subgraph InternalLedger
     B1[balances[payer]]
     B2[balances[recipient]]
     BF[balances[feeRecipient]]
