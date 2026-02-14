@@ -355,20 +355,20 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  Client[Client] --> Challenge[POST /v1/auth/challenge]
+  Client["Client"] --> Challenge["POST /v1/auth/challenge"]
   Challenge --> Client
-  Client --> Verify[POST /v1/auth/verify]
-  Verify --> Token[Session token]
+  Client --> Verify["POST /v1/auth/verify"]
+  Verify --> Token["Session token"]
 
-  subgraph Method Options
-    Wallet[Wallet signature (challenge signed)]
-    Passkey[WebAuthn passkey endpoints]
-    Social[OAuth start/exchange endpoints]
+  subgraph Methods
+    WalletSig["Wallet signature (challenge signed)"]
+    Passkeys["WebAuthn passkey endpoints"]
+    SocialOAuth["OAuth start/exchange endpoints"]
   end
 
-  Client --> Wallet
-  Client --> Passkey
-  Client --> Social
+  Client --> WalletSig
+  Client --> Passkeys
+  Client --> SocialOAuth
 ```
 
 Notes:
@@ -384,20 +384,20 @@ This diagram matches the schema created by `api/src/lib/db.ts` for SQLite and Po
 ```mermaid
 erDiagram
   users {
-    text id PK
-    text wallet_address UNIQUE
-    text handle UNIQUE
-    text email
+    string id PK
+    string wallet_address
+    string handle
+    string email
     int email_verified
-    text phone
+    string phone
     int phone_verified
-    numeric balance
-    bigint created_at
-    bigint updated_at
+    int balance
+    int created_at
+    int updated_at
   }
 
   pricing_profiles {
-    text user_id PK,FK
+    string user_id PK
     int default_price
     int first_contact_price
     int return_discount_bps
@@ -405,122 +405,122 @@ erDiagram
   }
 
   verification_codes {
-    text id PK
-    text user_id FK
-    text channel
-    text target
-    text code
+    string id PK
+    string user_id FK
+    string channel
+    string target
+    string code
     int verified
-    bigint expires_at
+    int expires_at
   }
 
   messages {
-    text id PK
-    text message_id UNIQUE
-    text sender_id FK
-    text recipient_id FK
-    text ciphertext
-    text content_hash
+    string id PK
+    string message_id
+    string sender_id FK
+    string recipient_id FK
+    string ciphertext
+    string content_hash
     int price
-    text status
-    text tx_hash
-    bigint created_at
+    string status
+    string tx_hash
+    int created_at
   }
 
   channel_connections {
     int id PK
-    text user_id FK
-    text channel
-    text external_handle
-    text secret_ref
-    text consent_version
-    bigint consent_accepted_at
-    text status
+    string user_id FK
+    string channel
+    string external_handle
+    string secret_ref
+    string consent_version
+    int consent_accepted_at
+    string status
   }
 
   delivery_jobs {
-    text id PK
-    text message_id FK
-    text user_id
-    text channel
-    text destination
-    text payload_json
-    text status
+    string id PK
+    string message_id FK
+    string user_id FK
+    string channel
+    string destination
+    string payload_json
+    string status
     int attempts
     int max_attempts
-    bigint next_attempt_at
-    text locked_by
-    bigint locked_until
-    text error_text
+    int next_attempt_at
+    string locked_by
+    int locked_until
+    string error_text
   }
 
   chain_event_checkpoints {
     int id PK
-    text chain_key UNIQUE
+    string chain_key
     int last_processed_block
-    bigint updated_at
+    int updated_at
   }
 
   chain_events {
-    text id PK
-    text chain_key
+    string id PK
+    string chain_key
     int block_number
-    text tx_hash
+    string tx_hash
     int log_index
-    text message_id
-    text payer
-    text recipient
-    text amount
-    text fee
-    text content_hash
+    string message_id
+    string payer
+    string recipient
+    string amount
+    string fee
+    string content_hash
     int nonce
     int channel
-    bigint observed_at
+    int observed_at
   }
 
   identity_bindings {
     int id PK
-    text user_id FK
-    text method
-    text provider
-    text subject
-    text wallet_address UNIQUE
-    bigint linked_at
-    bigint last_seen_at
-    bigint revoked_at
+    string user_id FK
+    string method
+    string provider
+    string subject
+    string wallet_address
+    int linked_at
+    int last_seen_at
+    int revoked_at
   }
 
   custodial_wallets {
-    text user_id PK,FK
-    text wallet_address UNIQUE
-    text encrypted_private_key_json
+    string user_id PK
+    string wallet_address
+    string encrypted_private_key_json
     int key_version
   }
 
   passkey_credentials {
-    text id PK
-    text user_id FK
-    text user_handle
-    text rp_id
-    text credential_id UNIQUE
-    text public_key_b64
+    string id PK
+    string user_id FK
+    string user_handle
+    string rp_id
+    string credential_id
+    string public_key_b64
     int counter
-    bigint last_used_at
-    bigint revoked_at
+    int last_used_at
+    int revoked_at
   }
 
   vault_blobs {
-    text user_id PK,FK
-    text blob_json
+    string user_id PK
+    string blob_json
     int version
   }
 
   vault_audit_log {
-    text id PK
-    text user_id FK
-    text event_type
-    bigint event_at
-    text metadata_json
+    string id PK
+    string user_id FK
+    string event_type
+    int event_at
+    string metadata_json
   }
 
   users ||--|| pricing_profiles : has
@@ -531,9 +531,9 @@ erDiagram
   users ||--o{ channel_connections : connects
   chain_event_checkpoints ||--o{ chain_events : tracks
   users ||--o{ identity_bindings : binds
-  users ||--|| custodial_wallets : "optional"
-  users ||--o{ passkey_credentials : "optional"
-  users ||--|| vault_blobs : "optional"
+  users ||--|| custodial_wallets : optional
+  users ||--o{ passkey_credentials : optional
+  users ||--|| vault_blobs : optional
   users ||--o{ vault_audit_log : audits
 ```
 
