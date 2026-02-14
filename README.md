@@ -4,30 +4,46 @@
 
 MMP is a production-style, end-to-end reference implementation of a **micropayment-enabled paid inbox**:
 
-- Users onboard and verify **phone + email** via OTP
-- Users can connect optional notification channels (**Telegram / WhatsApp / X**) with explicit consent gates
-- Messages are **paid** (simulated ledger by default, with **on-chain flows** supported via a local Hardhat chain)
-- A production-style **indexer** + **delivery worker** pipeline processes on-chain events and retries notifications
-- Built-in **launch readiness** and **compliance** checks, abuse controls, and a local observability stack
+- Verified onboarding: **phone + email** via OTP
+- Auth options: **wallet signature**, **WebAuthn passkeys**, **social OAuth (Google/GitHub)**
+- Paid messaging: **simulated ledger** by default, with **on-chain USDC flows** supported (Hardhat localnet; configurable for Base)
+- Opt-in notifications: **Telegram / WhatsApp / X**, gated by explicit consent + terms
+- Production mechanics: **Postgres + Redis**, checkpointed **chain indexer**, retrying **delivery worker**
+- Ops: launch readiness checks, abuse controls, and a local observability stack (Prometheus/Grafana/Tempo)
 
 The canonical inbox is **in-app**. External channels are treated as **opt-in notification rails**.
 
+## What MMP Is (and isn't)
+
+**MMP is:**
+
+- A blueprint you can run locally end-to-end (contracts + API + workers + observability)
+- A reference architecture for "paid attention" messaging with compliance gates and ops tooling
+- A monorepo you can deploy as a modular monolith (API + worker processes from the same `@mmp/api` package)
+
+**MMP is not:**
+
+- A way to send arbitrary iMessages or WhatsApp DMs as users (platform APIs do not support this reliably)
+- A replacement for a security review: contracts are unaudited and should not be used on mainnet without audits
+- A fully productized UX; the `web/` app is intentionally minimal
+
 ## Table Of Contents
 
-- Quickstart
-- Architecture
-- End-to-End Scripts
-- Configuration
-- API Surface
-- Persistence, Indexer, Delivery Worker
-- Smart Contracts
-- Observability
-- Launch Gates and Compliance
-- Security Notes
-- Testing
-- Deployment Notes
-- Troubleshooting
-- Further Reading
+- [Quickstart](#quickstart)
+- [Architecture](#architecture)
+- [Core Flows](#core-flows)
+- [Data Model](#data-model)
+- [Configuration](#configuration)
+- [API Surface](#api-surface)
+- [Workers](#workers)
+- [Smart Contracts](#smart-contracts)
+- [Observability](#observability)
+- [Launch Gates and Compliance](#launch-gates-and-compliance)
+- [Security Notes](#security-notes)
+- [Testing](#testing)
+- [Deployment Notes](#deployment-notes)
+- [Troubleshooting](#troubleshooting)
+- [Further Reading](#further-reading)
 
 ## Quickstart
 
@@ -60,7 +76,8 @@ pnpm run e2e:local
 
 ### Run The Production-Like Local Stack (Postgres + Redis + Workers + Hardhat)
 
-This starts Postgres and Redis via Docker Compose, runs migrations, starts a local Hardhat chain, deploys contracts, enables indexer + delivery worker modes, and runs the full API suite.
+This starts Postgres and Redis via Docker Compose, runs migrations, starts a local Hardhat chain, deploys contracts,
+enables indexer + delivery worker modes, and runs the full API suite.
 
 ```bash
 bash scripts/e2e-stack.sh
@@ -72,7 +89,29 @@ bash scripts/e2e-stack.sh
 bash scripts/observability-smoke.sh
 ```
 
-Grafana is exposed on `${MMP_GRAFANA_PORT:-3001}`.
+Grafana is exposed on `${MMP_GRAFANA_PORT:-3001}` (default credentials: `admin` / `mmp-grafana-admin`).
+
+### Run API + Web (Manual Dev Mode)
+
+In one terminal:
+
+```bash
+pnpm --dir api dev
+```
+
+In another terminal:
+
+```bash
+pnpm --dir web dev
+```
+
+Defaults:
+
+- API: `http://localhost:4000`
+- Web: `http://localhost:3000`
+
+By default, the API uses SQLite at `data/mmp.sqlite`. For production-like runs, use Postgres + Redis (see
+[Configuration](#configuration)).
 
 ## Architecture
 
@@ -86,28 +125,36 @@ Grafana is exposed on `${MMP_GRAFANA_PORT:-3001}`.
 - `specs/`: product requirements/design/tasks
 - `sop.txt`: original end-to-end blueprint/spec discussion
 
-### System Overview
+### System Overview (Context)
 
 ```mermaid
 flowchart LR
-  Web[Web UI (Next.js)] -->|HTTP| API[API (Fastify)]
+  subgraph Clients
+    WEB[Web UI (Next.js)]
+    SCRIPTS[scripts / curl]
+  end
 
-  API -->|SQL| PG[(Postgres)]
-  API -->|locks / ephemeral state| R[(Redis)]
+  WEB -->|HTTP| API[API (Fastify)]
+  SCRIPTS -->|HTTP| API
 
-  API -->|RPC| CHAIN[(EVM Chain: Hardhat / Base)]
+  API -->|SQL| DB[(Postgres / SQLite)]
+  API -->|challenge state + distributed locks| R[(Redis)]
 
-  subgraph Workers
+  API -->|RPC| CHAIN[(EVM Chain\nHardhat / Base)]
+
+  subgraph Workers (same @mmp/api codebase)
     IDX[Indexer Worker]
     DLW[Delivery Worker]
   end
 
-  API --- IDX
-  API --- DLW
-  IDX -->|poll events| CHAIN
-  IDX -->|checkpoint + upsert| PG
-  DLW -->|claim jobs| PG
-  DLW -->|send + retry| PROVIDERS[Telegram / WhatsApp / X]
+  IDX -->|poll logs| CHAIN
+  IDX -->|checkpoint + upsert| DB
+
+  DLW -->|claim jobs + retry| DB
+  DLW -->|notify| PROVIDERS[Telegram / WhatsApp / X]
+
+  API -->|send OTP| OTP[Twilio / SendGrid\n(or console in dev)]
+  API -->|OAuth| OAUTH[Google / GitHub]
 
   API -->|/v1/metrics| PROM[Prometheus]
   API -->|OTLP traces| TEMPO[Tempo]
@@ -116,6 +163,78 @@ flowchart LR
   PROM --> AM[Alertmanager]
   AM -->|webhook| API
 ```
+
+### Local Production-Like Stack
+
+```mermaid
+flowchart TB
+  DEV[Developer Machine] -->|bash scripts/e2e-stack.sh| STACK[Local Stack]
+
+  subgraph STACK
+    HH[Hardhat Node :8545]
+    API[API :4000]
+    IDX[Indexer]
+    DLW[Delivery Worker]
+    PG[(Postgres :5433+)]
+    R[(Redis :6379+)]
+  end
+
+  API --> PG
+  API --> R
+  API --> HH
+  IDX --> HH
+  IDX --> PG
+  DLW --> PG
+```
+
+### Production Topology (Recommended)
+
+```mermaid
+flowchart TB
+  U[Users] --> LB[Load Balancer]
+  LB --> API1[API instance]
+  LB --> API2[API instance]
+
+  subgraph Workers
+    IDX[Indexer worker]
+    DLW[Delivery worker]
+  end
+
+  API1 --> PG[(Managed Postgres)]
+  API2 --> PG
+  API1 --> R[(Managed Redis)]
+  API2 --> R
+  IDX --> PG
+  DLW --> PG
+  IDX --> R
+  DLW --> R
+
+  API1 --> RPC[Base RPC Provider]
+  API2 --> RPC
+  IDX --> RPC
+
+  DLW --> TG[Telegram API]
+  DLW --> WA[WhatsApp Cloud API / Relay]
+  DLW --> X[X API / Relay]
+
+  API1 --> PROM[Prometheus]
+  API2 --> PROM
+  API1 --> OTLP[Tempo/OTLP]
+  API2 --> OTLP
+```
+
+### CI Pipeline (GitHub Actions)
+
+```mermaid
+flowchart LR
+  PUSH[push / PR] --> CI[GitHub Actions]
+  CI --> LINT[lint]
+  CI --> TC[typecheck]
+  CI --> TESTS[test]
+  CI --> BUILD[build]
+```
+
+## Core Flows
 
 ### Paid Message Lifecycle (In-App + Optional On-Chain Receipt)
 
@@ -155,38 +274,268 @@ sequenceDiagram
   end
 ```
 
-### Auth Modes (Wallet, Passkeys, Social OAuth)
+Notes:
+
+- In-app delivery is always the source of truth; notifications must never block message access.
+- Messages include a `content_hash` (for receipt/fingerprint), but the stored `ciphertext` is intentionally a placeholder
+  in this reference implementation.
+
+### OTP Verification (Phone + Email)
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant A as API
+  participant DB as Postgres/SQLite
+  participant O as OTP Provider (Twilio/SendGrid/console)
+
+  U->>A: POST /v1/verify/request
+  A->>DB: create verification_codes row
+  A->>O: send OTP code
+  A-->>U: { delivered: true, targetMasked, provider }
+
+  U->>A: POST /v1/verify/confirm
+  A->>DB: verify code + mark verified
+  A->>DB: update users.email_verified / phone_verified
+  A-->>U: { ok: true }
+```
+
+### Top Up + Withdraw
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant A as API
+  participant DB as Postgres/SQLite
+  participant C as Chain (Hardhat/Base)
+
+  alt On-chain topup enabled (signer matches user)
+    U->>A: POST /v1/payments/topup
+    A->>C: approve + deposit (USDC -> Vault)
+    A->>C: read vault balance(user)
+    A->>DB: set users.balance = onchain balance
+    A-->>U: { balance, mode: onchain }
+  else Simulated ledger
+    U->>A: POST /v1/payments/topup
+    A->>DB: users.balance += amount
+    A-->>U: { balance }
+  end
+
+  alt On-chain withdraw enabled (signer matches user)
+    U->>A: POST /v1/payments/withdraw
+    A->>C: withdraw (Vault -> user)
+    A->>C: read vault balance(user)
+    A->>DB: set users.balance = onchain balance
+    A-->>U: { balance, mode: onchain }
+  else Simulated ledger
+    U->>A: POST /v1/payments/withdraw
+    A->>DB: users.balance -= amount
+    A-->>U: { balance }
+  end
+```
+
+### Channel Connect + Consent Gates
 
 ```mermaid
 flowchart TB
-  Client[Client] --> AuthChallenge[POST /v1/auth/challenge]
-  AuthChallenge --> Client
-
-  Client --> AuthVerify[POST /v1/auth/verify]
-  AuthVerify --> User[User Session Token]
-
-  subgraph Methods
-    WalletSig[Wallet signature proof]
-    Passkeys[WebAuthn passkeys]
-    Social[OAuth (Google/GitHub)]
-  end
-
-  Client --> WalletSig
-  Client --> Passkeys
-  Client --> Social
-
-  WalletSig --> AuthVerify
-  Passkeys --> AuthVerify
-  Social --> AuthVerify
+  C[Client] --> REQ[POST /v1/channels/:channel/connect]
+  REQ --> AUTH{Bearer token matches userId?}
+  AUTH -->|no| DENY[401/403]
+  AUTH -->|yes| TERMS{WhatsApp/X terms required?}
+  TERMS -->|missing| BLOCK[403 compliance_required]
+  TERMS -->|ok| READY{Provider configured + tokens present?}
+  READY -->|no| UNAV[503 provider_unavailable]
+  READY -->|yes| SECRET{Secret is vault ref or encrypted envelope?}
+  SECRET -->|no| BAD[400 invalid_secret_format]
+  SECRET -->|yes| SAVE[Upsert channel_connections + audit log]
+  SAVE --> OK[200 connected:true]
 ```
 
-## End-to-End Scripts
+### Auth Modes (Wallet, Passkeys, Social)
 
-| Script | What It Does | Requires |
-| --- | --- | --- |
-| `scripts/e2e-local.sh` | Starts Hardhat node, deploys contracts, runs contract smoke, runs API chain integration tests, runs repo tests. | Node + pnpm |
-| `scripts/e2e-stack.sh` | Starts Postgres + Redis (Docker), starts Hardhat node, deploys contracts, enables indexer + delivery workers, runs API postgres/redis integration suite. | Docker + Node + pnpm |
-| `scripts/observability-smoke.sh` | Starts Prometheus/Grafana/Alertmanager/Tempo and validates metrics + OTLP trace export from the API. | Docker + Node + pnpm |
+```mermaid
+flowchart TB
+  Client[Client] --> Challenge[POST /v1/auth/challenge]
+  Challenge --> Client
+  Client --> Verify[POST /v1/auth/verify]
+  Verify --> Token[Session token]
+
+  subgraph Method Options
+    Wallet[Wallet signature (challenge signed)]
+    Passkey[WebAuthn passkey endpoints]
+    Social[OAuth start/exchange endpoints]
+  end
+
+  Client --> Wallet
+  Client --> Passkey
+  Client --> Social
+```
+
+Notes:
+
+- Wallet auth uses `ethers.verifyMessage` over the issued challenge.
+- Passkey auth uses `@simplewebauthn/server` and creates a custodial EOA for the user (encrypted at rest).
+- Social OAuth uses PKCE and creates a custodial EOA for the user (encrypted at rest).
+
+## Data Model
+
+This diagram matches the schema created by `api/src/lib/db.ts` for SQLite and Postgres.
+
+```mermaid
+erDiagram
+  users {
+    text id PK
+    text wallet_address UNIQUE
+    text handle UNIQUE
+    text email
+    int email_verified
+    text phone
+    int phone_verified
+    numeric balance
+    bigint created_at
+    bigint updated_at
+  }
+
+  pricing_profiles {
+    text user_id PK,FK
+    int default_price
+    int first_contact_price
+    int return_discount_bps
+    int accepts_all
+  }
+
+  verification_codes {
+    text id PK
+    text user_id FK
+    text channel
+    text target
+    text code
+    int verified
+    bigint expires_at
+  }
+
+  messages {
+    text id PK
+    text message_id UNIQUE
+    text sender_id FK
+    text recipient_id FK
+    text ciphertext
+    text content_hash
+    int price
+    text status
+    text tx_hash
+    bigint created_at
+  }
+
+  channel_connections {
+    int id PK
+    text user_id FK
+    text channel
+    text external_handle
+    text secret_ref
+    text consent_version
+    bigint consent_accepted_at
+    text status
+  }
+
+  delivery_jobs {
+    text id PK
+    text message_id FK
+    text user_id
+    text channel
+    text destination
+    text payload_json
+    text status
+    int attempts
+    int max_attempts
+    bigint next_attempt_at
+    text locked_by
+    bigint locked_until
+    text error_text
+  }
+
+  chain_event_checkpoints {
+    int id PK
+    text chain_key UNIQUE
+    int last_processed_block
+    bigint updated_at
+  }
+
+  chain_events {
+    text id PK
+    text chain_key
+    int block_number
+    text tx_hash
+    int log_index
+    text message_id
+    text payer
+    text recipient
+    text amount
+    text fee
+    text content_hash
+    int nonce
+    int channel
+    bigint observed_at
+  }
+
+  identity_bindings {
+    int id PK
+    text user_id FK
+    text method
+    text provider
+    text subject
+    text wallet_address UNIQUE
+    bigint linked_at
+    bigint last_seen_at
+    bigint revoked_at
+  }
+
+  custodial_wallets {
+    text user_id PK,FK
+    text wallet_address UNIQUE
+    text encrypted_private_key_json
+    int key_version
+  }
+
+  passkey_credentials {
+    text id PK
+    text user_id FK
+    text user_handle
+    text rp_id
+    text credential_id UNIQUE
+    text public_key_b64
+    int counter
+    bigint last_used_at
+    bigint revoked_at
+  }
+
+  vault_blobs {
+    text user_id PK,FK
+    text blob_json
+    int version
+  }
+
+  vault_audit_log {
+    text id PK
+    text user_id FK
+    text event_type
+    bigint event_at
+    text metadata_json
+  }
+
+  users ||--|| pricing_profiles : has
+  users ||--o{ verification_codes : requests
+  users ||--o{ messages : sends
+  users ||--o{ messages : receives
+  messages ||--o{ delivery_jobs : notifies
+  users ||--o{ channel_connections : connects
+  chain_event_checkpoints ||--o{ chain_events : tracks
+  users ||--o{ identity_bindings : binds
+  users ||--|| custodial_wallets : "optional"
+  users ||--o{ passkey_credentials : "optional"
+  users ||--|| vault_blobs : "optional"
+  users ||--o{ vault_audit_log : audits
+```
 
 ## Configuration
 
@@ -224,6 +573,29 @@ Signer selection for chain sends (in order):
 2. Custodial wallet stored for the user (created by passkey/social flows)
 3. Global `CHAIN_PAYER_PRIVATE_KEY`
 
+### Auth (Wallet / Passkeys / Social OAuth)
+
+Passkeys (WebAuthn, local):
+
+- `PASSKEY_RP_ID` (default `localhost`)
+- `PASSKEY_ORIGIN` (default `http://localhost:3000`)
+
+Social OAuth (local):
+
+- Google: `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET`, `OAUTH_GOOGLE_REDIRECT_URI`
+- GitHub: `OAUTH_GITHUB_CLIENT_ID`, `OAUTH_GITHUB_CLIENT_SECRET`, `OAUTH_GITHUB_REDIRECT_URI`
+
+Remote verifier mode (optional, strict identity):
+
+- `IDENTITY_VERIFICATION_STRICT=true`
+- `PASSKEY_VERIFY_URL` and/or `SOCIAL_VERIFY_URL`
+
+Terms gating (recommended for WhatsApp/X and social/passkey auth):
+
+- `REQUIRE_SOCIAL_TOS_ACCEPTED=true`
+- `LEGAL_TOS_VERSION=v1` (or your current version)
+- `LEGAL_TOS_APPROVED_AT=<timestamp>`
+
 ### Notification Providers (Telegram, WhatsApp, X)
 
 Providers are optional, but can be enforced via launch gates.
@@ -232,11 +604,9 @@ Providers are optional, but can be enforced via launch gates.
 - WhatsApp: configure either Cloud API (`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCOUNT_TOKEN`) or a webhook relay (`WHATSAPP_WEBHOOK_URL`, `WHATSAPP_WEBHOOK_TOKEN`)
 - X: configure either bearer token (`X_BEARER_TOKEN`) or webhook relay (`X_WEBHOOK_URL`, `X_WEBHOOK_TOKEN`)
 
-Channel connections store opt-in evidence (`consent_version`, `consent_accepted_at`) and can be gated via:
+Strict mode:
 
-- `REQUIRE_SOCIAL_TOS_ACCEPTED=true`
-- `LEGAL_TOS_VERSION=...`
-- `LEGAL_TOS_APPROVED_AT=...`
+- `NOTIFICATION_PROVIDERS_STRICT=true` blocks connector usage unless required auth tokens are present.
 
 ### OTP Providers (Phone and Email)
 
@@ -327,7 +697,51 @@ Operations, compliance, observability:
 - `POST /v1/observability/alert-hook`
 - `GET /v1/metrics`
 
-## Persistence, Indexer, Delivery Worker
+### Minimal cURL Smoke (Simulated Ledger Mode)
+
+Run the API (`pnpm --dir api dev`), then in another terminal:
+
+```bash
+# Requires: curl + node. Optional: jq for pretty output.
+#
+# 1) Register two users
+SENDER=$(curl -s http://localhost:4000/v1/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"walletAddress":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","handle":"sender"}')
+
+RECIP=$(curl -s http://localhost:4000/v1/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"walletAddress":"0x90F79bf6EB2c4f870365E785982E1f101E93b906","handle":"alice"}')
+
+SENDER_TOKEN=$(SENDER="$SENDER" node -p 'JSON.parse(process.env.SENDER).token')
+RECIP_TOKEN=$(RECIP="$RECIP" node -p 'JSON.parse(process.env.RECIP).token')
+SENDER_ID=$(SENDER="$SENDER" node -p 'JSON.parse(process.env.SENDER).user.id')
+RECIP_ID=$(RECIP="$RECIP" node -p 'JSON.parse(process.env.RECIP).user.id')
+
+# 2) Top up sender
+curl -s http://localhost:4000/v1/payments/topup \
+  -H "authorization: Bearer $SENDER_TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"userId\":\"$SENDER_ID\",\"amount\":1000}"
+
+# 3) Set recipient pricing
+curl -s http://localhost:4000/v1/pricing \
+  -H "authorization: Bearer $RECIP_TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"userId\":\"$RECIP_ID\",\"defaultPrice\":200,\"firstContactPrice\":500,\"returnDiscountBps\":500,\"acceptsAll\":true}"
+
+# 4) Send a paid message (recipientSelector can be @handle or phone if discoverable)
+curl -s http://localhost:4000/v1/messages/send \
+  -H "authorization: Bearer $SENDER_TOKEN" \
+  -H 'content-type: application/json' \
+  -d "{\"senderId\":\"$SENDER_ID\",\"recipientSelector\":\"@alice\",\"plaintext\":\"hello\"}"
+
+# 5) Read inbox
+curl -s "http://localhost:4000/v1/messages/inbox/$RECIP_ID" \
+  -H "authorization: Bearer $RECIP_TOKEN"
+```
+
+## Workers
 
 ### Persistence Model
 
@@ -369,6 +783,21 @@ flowchart LR
   DLW -->|mark done/failed| DJ
 ```
 
+### Delivery Job State Machine
+
+Dead-lettering is represented by `status='failed'` with an `error_text` prefixed by `max_retries_reached:`.
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending
+  pending --> processing: claim (locks + attempts++)
+  processing --> done: provider ok
+  processing --> pending: failure + backoff
+  processing --> failed: max retries reached
+  done --> [*]
+  failed --> [*]
+```
+
 ## Smart Contracts
 
 The on-chain model uses a prepaid vault contract that emits receipts for each paid message.
@@ -403,10 +832,6 @@ flowchart TB
   V -->|emit| E[MessagePaid(payer, recipient, messageId, amount, fee, contentHash, nonce, channel)]
 ```
 
-### PricingRegistry (Policy)
-
-Stores recipient pricing config and allowlist discounts. This contract is separate from the vault so pricing policy can evolve independently.
-
 ## Observability
 
 Local stack components:
@@ -432,7 +857,9 @@ Helpful endpoints:
 - `GET /v1/observability/alerts`: threshold-based health evaluation
 - `GET /v1/compliance/launch-readiness`: launch gate report
 
-## Launch Gates And Compliance
+See `docs/observability/README.md`.
+
+## Launch Gates and Compliance
 
 Launch readiness can be enforced at runtime and checked via the API.
 
@@ -455,8 +882,10 @@ See `docs/compliance/launch-gates.md` for the full gate definition.
 Key guardrails in this repo:
 
 - Strict persistence mode blocks unsafe deployments (SQLite + multi-instance workers without Redis).
-- Connector secrets are not accepted in plaintext. Channel connect requires an encrypted envelope or vault reference.
-- Vault encryption uses AES-256-GCM (server-side master key). If you need a true client-held "credential suitcase", add client-side encryption and key management.
+- Channel connect rejects plaintext secrets. Provide a vault reference (e.g. `vault:<ref>`) or an encrypted envelope JSON.
+- Vault encryption uses AES-256-GCM with a server-side master key (`VAULT_MASTER_KEY`). For a true client-held
+  "credential suitcase", add client-side encryption and key management.
+- Private-key input is blocked by default in production (`ALLOW_UNSAFE_PRIVATE_KEY_INPUT=false`).
 - Abuse controls are enabled by default and enforced in the message-send path.
 
 Before mainnet usage, run the contract audit checklist:
@@ -498,7 +927,8 @@ Recommended production setup:
 ## Troubleshooting
 
 - Port conflicts: `scripts/e2e-stack.sh` auto-selects open ports for Postgres/Redis if defaults are taken.
-- Docker networking: Prometheus scrapes `host.docker.internal:4000` by default. On Linux, you may need to adjust `infra/observability/prometheus.yml`.
+- Docker networking: Prometheus scrapes `host.docker.internal:4000` by default. On Linux, you may need to adjust
+  `infra/observability/prometheus.yml`.
 - Grafana port: use `MMP_GRAFANA_PORT=...` if `3001` is taken.
 - Production boot fails: check `GET /v1/compliance/launch-readiness` and verify required env vars are set.
 
