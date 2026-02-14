@@ -1,0 +1,23 @@
+{
+  "name": "mmp",
+  "private": true,
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "e2e:local": "bash ./scripts/e2e-local.sh",
+    "hardening": "pnpm --dir api run hardening",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build",
+    "ci": "pnpm run lint && pnpm run test && pnpm run build",
+    "bootstrap": "pnpm install"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  },
+  "workspaces": [
+    "contracts",
+    "api",
+    "web"
+  ]
+}

@@ -1,0 +1,32 @@
+groups:
+  - name: mmp-core-alerts
+    rules:
+      - alert: MMPDeliveryQueueBacklog
+        expr: mmp_delivery_jobs_pending_total > 200
+        for: 1m
+        labels:
+          severity: warning
+          service: mmp-api
+        annotations:
+          summary: "MMP delivery queue backlog exceeds threshold"
+          description: "Pending delivery jobs are above 200 for at least 1 minute."
+
+      - alert: MMPDeliveryDeadLetters
+        expr: mmp_delivery_jobs_dead_letter_total > 0
+        for: 30s
+        labels:
+          severity: critical
+          service: mmp-api
+        annotations:
+          summary: "MMP dead-letter queue has items"
+          description: "One or more delivery jobs are in dead-letter state."
+
+      - alert: MMPDeliveryWorkerErrors
+        expr: increase(mmp_delivery_jobs_failed_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: mmp-api
+        annotations:
+          summary: "MMP delivery worker errors are elevated"
+          description: "More than 5 failed deliveries in the last 5m."

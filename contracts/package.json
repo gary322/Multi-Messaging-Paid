@@ -1,0 +1,27 @@
+{
+  "name": "@mmp/contracts",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "test": "hardhat test",
+    "build": "hardhat compile",
+    "lint": "hardhat compile",
+    "typecheck": "tsc -p tsconfig.json",
+    "deploy-local": "hardhat run scripts/deploy-local.ts --network localhost",
+    "smoke-local": "hardhat run scripts/smoke.ts --network localhost",
+    "mint": "hardhat run scripts/mint.ts --network localhost",
+    "audit:slither": "bash scripts/slither.sh"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.0.0",
+    "@types/node": "^22.10.2",
+    "@types/chai": "^4.3.2",
+    "chai": "^4.5.0",
+    "hardhat": "^2.22.11",
+    "ethers": "^6.13.1",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.1.0"
+  }
+}
