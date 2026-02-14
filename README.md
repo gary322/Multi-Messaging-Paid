@@ -128,23 +128,21 @@ By default, the API uses SQLite at `data/mmp.sqlite`. For production-like runs, 
 
 ```mermaid
 flowchart LR
-  subgraph Clients
-    WEB["Web UI (Next.js)"]
-    SCRIPTS[scripts / curl]
+  subgraph Clients["Clients"]
+    WEB["Web UI: Next.js"]
+    SCRIPTS["scripts / curl"]
   end
 
-  WEB -->|HTTP| API["API (Fastify)"]
+  WEB -->|HTTP| API["API: Fastify"]
   SCRIPTS -->|HTTP| API
 
-  API -->|SQL| DB[(Postgres / SQLite)]
-  API -->|challenge state + distributed locks| R[(Redis)]
+  API -->|SQL| DB["Postgres / SQLite"]
+  API -->|challenge state + distributed locks| R["Redis"]
+  API -->|RPC| CHAIN["EVM chain: Hardhat / Base"]
 
-  API -->|RPC| CHAIN[(EVM Chain: Hardhat / Base)]
-
-  %% Workers are separate processes from the same @mmp/api codebase.
-  subgraph Workers
-    IDX[Indexer Worker]
-    DLW[Delivery Worker]
+  subgraph Workers["Workers"]
+    IDX["Indexer worker"]
+    DLW["Delivery worker"]
   end
 
   IDX -->|poll logs| CHAIN
@@ -153,14 +151,14 @@ flowchart LR
   DLW -->|claim jobs + retry| DB
   DLW -->|notify| PROVIDERS["Telegram / WhatsApp / X"]
 
-  API -->|send OTP| OTP["Twilio / SendGrid (or console in dev)"]
+  API -->|send OTP| OTP["Twilio / SendGrid, console in dev"]
   API -->|OAuth| OAUTH["Google / GitHub"]
 
-  API -->|/v1/metrics| PROM[Prometheus]
-  API -->|OTLP traces| TEMPO[Tempo]
-  PROM --> GRAF[Grafana]
+  API -->|/v1/metrics| PROM["Prometheus"]
+  API -->|OTLP traces| TEMPO["Tempo"]
+  PROM --> GRAF["Grafana"]
   TEMPO --> GRAF
-  PROM --> AM[Alertmanager]
+  PROM --> AM["Alertmanager"]
   AM -->|webhook| API
 ```
 
@@ -168,16 +166,21 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  DEV[Developer Machine] -->|bash scripts/e2e-stack.sh| STACK[Local Stack]
+  DEV["Developer machine"] --> E2E["scripts/e2e-stack.sh"]
 
-  subgraph STACK
-    HH[Hardhat Node :8545]
-    API[API :4000]
-    IDX[Indexer]
-    DLW[Delivery Worker]
-    PG[(Postgres :5433+)]
-    R[(Redis :6379+)]
+  subgraph STACK["Local stack"]
+    HH["Hardhat node: 8545"]
+    API["API: 4000"]
+    IDX["Indexer"]
+    DLW["Delivery worker"]
+    PG["Postgres: 5433+"]
+    R["Redis: 6379+"]
   end
+
+  E2E --> HH
+  E2E --> PG
+  E2E --> R
+  E2E --> API
 
   API --> PG
   API --> R
@@ -191,35 +194,35 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  U[Users] --> LB[Load Balancer]
-  LB --> API1[API instance]
-  LB --> API2[API instance]
+  U["Users"] --> LB["Load balancer"]
+  LB --> API1["API instance"]
+  LB --> API2["API instance"]
 
-  subgraph Workers
-    IDX[Indexer worker]
-    DLW[Delivery worker]
+  subgraph Workers["Workers"]
+    IDX["Indexer worker"]
+    DLW["Delivery worker"]
   end
 
-  API1 --> PG[(Managed Postgres)]
+  API1 --> PG["Managed Postgres"]
   API2 --> PG
-  API1 --> R[(Managed Redis)]
+  API1 --> R["Managed Redis"]
   API2 --> R
   IDX --> PG
   DLW --> PG
   IDX --> R
   DLW --> R
 
-  API1 --> RPC[Base RPC Provider]
+  API1 --> RPC["Base RPC provider"]
   API2 --> RPC
   IDX --> RPC
 
-  DLW --> TG[Telegram API]
-  DLW --> WA[WhatsApp Cloud API / Relay]
-  DLW --> X[X API / Relay]
+  DLW --> TG["Telegram API"]
+  DLW --> WA["WhatsApp Cloud API / relay"]
+  DLW --> XAPI["X API / relay"]
 
-  API1 --> PROM[Prometheus]
+  API1 --> PROM["Prometheus"]
   API2 --> PROM
-  API1 --> OTLP[Tempo/OTLP]
+  API1 --> OTLP["Tempo / OTLP"]
   API2 --> OTLP
 ```
 
@@ -243,16 +246,16 @@ sequenceDiagram
   participant S as Sender
   participant A as API
   participant DB as Postgres/SQLite
-  participant C as Chain (Hardhat/Base)
-  participant I as Indexer Worker
-  participant W as Delivery Worker
-  participant P as Providers (Telegram/WhatsApp/X)
+  participant C as Chain: Hardhat/Base
+  participant I as Indexer worker
+  participant W as Delivery worker
+  participant P as Providers: Telegram/WhatsApp/X
 
   S->>A: POST /v1/messages/send
   A->>DB: authz + resolve recipient + compute price
 
   alt Chain configured + signer available
-    A->>C: sendMessagePayment(...)
+    A->>C: sendMessagePayment
     C-->>A: txHash
     A->>DB: write message + enqueue delivery jobs
     A-->>S: { status: delivered, txHash }
@@ -287,7 +290,7 @@ sequenceDiagram
   participant U as User
   participant A as API
   participant DB as Postgres/SQLite
-  participant O as OTP Provider (Twilio/SendGrid/console)
+  participant O as OTP Provider: Twilio/SendGrid/console
 
   U->>A: POST /v1/verify/request
   A->>DB: create verification_codes row
@@ -307,12 +310,12 @@ sequenceDiagram
   participant U as User
   participant A as API
   participant DB as Postgres/SQLite
-  participant C as Chain (Hardhat/Base)
+  participant C as Chain: Hardhat/Base
 
-  alt On-chain topup enabled (signer matches user)
+  alt On-chain topup enabled, signer matches user
     U->>A: POST /v1/payments/topup
-    A->>C: approve + deposit (USDC -> Vault)
-    A->>C: read vault balance(user)
+    A->>C: approve + deposit USDC -> Vault
+    A->>C: read vault balance for user
     A->>DB: set users.balance = onchain balance
     A-->>U: { balance, mode: onchain }
   else Simulated ledger
@@ -321,10 +324,10 @@ sequenceDiagram
     A-->>U: { balance }
   end
 
-  alt On-chain withdraw enabled (signer matches user)
+  alt On-chain withdraw enabled, signer matches user
     U->>A: POST /v1/payments/withdraw
-    A->>C: withdraw (Vault -> user)
-    A->>C: read vault balance(user)
+    A->>C: withdraw Vault -> user
+    A->>C: read vault balance for user
     A->>DB: set users.balance = onchain balance
     A-->>U: { balance, mode: onchain }
   else Simulated ledger
@@ -361,7 +364,7 @@ flowchart TB
   Verify --> Token["Session token"]
 
   subgraph Methods
-    WalletSig["Wallet signature (challenge signed)"]
+    WalletSig["Wallet signature: challenge signed"]
     Passkeys["WebAuthn passkey endpoints"]
     SocialOAuth["OAuth start/exchange endpoints"]
   end
@@ -790,7 +793,7 @@ Dead-lettering is represented by `status='failed'` with an `error_text` prefixed
 ```mermaid
 stateDiagram-v2
   [*] --> pending
-  pending --> processing: claim (locks + attempts++)
+  pending --> processing: claim locks + attempts++
   processing --> done: provider ok
   processing --> pending: failure + backoff
   processing --> failed: max retries reached
@@ -820,16 +823,16 @@ flowchart TB
   V -->|withdraw| U
 
   subgraph InternalLedger
-    B1["balances (payer)"]
-    B2["balances (recipient)"]
-    BF["balances (feeRecipient)"]
+    B1["balances: payer"]
+    B2["balances: recipient"]
+    BF["balances: feeRecipient"]
   end
 
   V --> B1
   V --> B2
   V --> BF
 
-  V -->|emit| E["MessagePaid(payer, recipient, messageId, amount, fee, contentHash, nonce, channel)"]
+  V -->|emit| E["MessagePaid event: payer, recipient, messageId, amount, fee, contentHash, nonce, channel"]
 ```
 
 ## Observability
