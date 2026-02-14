@@ -3,9 +3,9 @@ goal: Build `mmp`, a paid inbox on Base where senders pay per message to reach r
 status: draft
 ---
 
-## 1) Intent and Scope From SOP
+## 1) Intent and Scope
 
-The SOP defines `mmp` as an anti-spam paid inbox with:
+MMP is defined as an anti-spam paid inbox with:
 - Pay-per-message economics on-chain (Base/USDC).
 - Phone + email verification during onboarding.
 - Recipient-configured rates and optional allowlist/reputation logic.
@@ -14,7 +14,7 @@ The SOP defines `mmp` as an anti-spam paid inbox with:
 
 ## 2) Critical Feasibility Notes
 
-The SOP explicitly flags that true P2P messaging via iMessage/WhatsApp/Telegram/X is not always possible via unrestricted APIs.  
+True P2P messaging via iMessage/WhatsApp/Telegram/X is not always possible via unrestricted APIs.  
 Production-safe interpretation:
 - Canonical delivery channel is in-app (Web/Mobile inbox).
 - External channels are opt-in notification forwarders only.
@@ -32,7 +32,6 @@ This constraint is foundational and is treated as a hard architecture rule.
 
 ## 4) Non-Technical Reference Inputs and Risks
 
-- `sop.txt` is the only in-repo source and already contains policy-aware channel notes.
 - API policy can change; all integrations need contract tests + integration staging checks.
 - Financial flows introduce legal/compliance risk (money movement, KYC/AML, sanctions depending on jurisdiction).
 - Gas, chain confirmation latency, and RPC reliability require resilience layers.

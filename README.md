@@ -123,7 +123,6 @@ By default, the API uses SQLite at `data/mmp.sqlite`. For production-like runs, 
 - `infra/`: Docker Compose for local Postgres/Redis and observability stack
 - `scripts/`: end-to-end runners and smoke checks
 - `specs/`: product requirements/design/tasks
-- `sop.txt`: original end-to-end blueprint/spec discussion
 
 ### System Overview (Context)
 
@@ -821,9 +820,9 @@ flowchart TB
   V -->|withdraw| U
 
   subgraph InternalLedger
-    B1[balances[payer]]
-    B2[balances[recipient]]
-    BF[balances[feeRecipient]]
+    B1["balances (payer)"]
+    B2["balances (recipient)"]
+    BF["balances (feeRecipient)"]
   end
 
   V --> B1
@@ -935,7 +934,6 @@ Recommended production setup:
 
 ## Further Reading
 
-- `sop.txt`
 - `specs/mmp/requirements.md`
 - `specs/mmp/design.md`
 - `specs/mmp/tasks.md`
