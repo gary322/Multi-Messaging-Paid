@@ -12,6 +12,7 @@ coverage
 artifacts
 contracts/cache
 contracts/typechain-types
+contracts/tools/
 .cache
 *.tsbuildinfo
 .next
